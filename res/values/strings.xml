@@ -4933,5 +4933,13 @@
     <string name="zenithos_version">ZenithOS Version</string>
     <string name="custom_carrier_label_title">Custom carrier label</string>
     <string name="custom_carrier_label_summary">Edit your carrier label</string>
-    
+ 
+    <string name="disable_2g_title">Don\'t connect to 2G/GSM Networks</string>
+    <string name="disable_2g_dialog_title">Don\'t connect to 2G/GSM Networks</string>
+    <string name="disable_2g_summary">Disable 2G Connection. Recommended, because 2G is unsafe network.</string>   
+    <string name="disable_2g_dialog_message">
+        Please note: This feature disables 2G. If you have poor network coverage in your location, you may lose network access altogether.
+    </string>
+    <string name="button_ok">OK</string>
+    <string name="button_cancel">Cancel</string>
 </resources>

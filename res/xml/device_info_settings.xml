@@ -111,7 +111,7 @@
         <Preference
                 android:key="zenithos_version"
                 android:title="@string/zenithos_version"
-                 android:summary="3.2"/>
+                 android:summary="3.3"/>
                 
         <!-- CPU Model -->
         <Preference

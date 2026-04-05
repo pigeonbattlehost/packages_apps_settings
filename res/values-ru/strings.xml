@@ -2057,5 +2057,14 @@
     <string name="zenithos_version">Версия ZenithOS</string>
     <string name="custom_carrier_label_title">Своя подпись оператора</string>
     <string name="custom_carrier_label_summary">Отредактируй подпись оператора</string>
+    
+    <string name="disable_2g_title">Не подключаться к 2G/GSM сетям</string>
+    <string name="disable_2g_summary">Отключает подключение к 2G. Рекомендуется, потому что 2G уже небезопасна.</string>
+    <string name="disable_2g_dialog_title">Не подключаться к 2G/GSM</string>
+    <string name="disable_2g_dialog_message">
+        Внимание! Данная функция отключает 2G. Если в твоем местоположении слабое покрытие сети, то ты можешь потерять доступ к сети вообще.
+    </string>
+    <string name="button_ok">OK</string>
+    <string name="button_cancel">Cancel</string>
     <string name="regulatory_info_text" msgid="5623087902354026557"></string>
 </resources>

@@ -16,7 +16,6 @@
 
 package com.android.settings;
 
-
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -39,17 +38,20 @@ import android.preference.CheckBoxPreference;
 import android.preference.Preference;
 import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.PreferenceScreen;
+import android.preference.SwitchPreference;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
 
+import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.SmsApplication;
 import com.android.internal.telephony.SmsApplication.SmsApplicationData;
 import com.android.internal.telephony.TelephonyIntents;
 import com.android.internal.telephony.TelephonyProperties;
 import com.android.settings.nfc.NfcEnabler;
 
+import java.lang.reflect.Method;
 import java.util.Collection;
 
 public class WirelessSettings extends RestrictedSettingsFragment
@@ -66,8 +68,13 @@ public class WirelessSettings extends RestrictedSettingsFragment
     private static final String KEY_MOBILE_NETWORK_SETTINGS = "mobile_network_settings";
     private static final String KEY_MANAGE_MOBILE_PLAN = "manage_mobile_plan";
     private static final String KEY_SMS_APPLICATION = "sms_application";
-    private static final String KEY_TOGGLE_NSD = "toggle_nsd"; //network service discovery
+    private static final String KEY_TOGGLE_NSD = "toggle_nsd"; // network service discovery
     private static final String KEY_CELL_BROADCAST_SETTINGS = "cell_broadcast_settings";
+    private static final String KEY_DISABLE_2G_NETWORKS = "disable_2g_networks";
+
+    private static final String SETTING_DISABLE_2G = "zenith_disable_2g";
+    private static final String SETTING_PREVIOUS_NETWORK_MODE = "zenith_previous_network_mode";
+    private static final String SETTING_PREFERRED_NETWORK_MODE = "preferred_network_mode";
 
     public static final String EXIT_ECM_RESULT = "exit_ecm_result";
     public static final int REQUEST_CODE_EXIT_ECM = 1;
@@ -85,38 +92,37 @@ public class WirelessSettings extends RestrictedSettingsFragment
     private static final String SAVED_MANAGE_MOBILE_PLAN_MSG = "mManageMobilePlanMessage";
 
     private SmsListPreference mSmsApplicationPreference;
+    private SwitchPreference mDisable2gPreference;
+
+    private String mManageMobilePlanMessage;
+
+    private static final String CONNECTED_TO_PROVISIONING_NETWORK_ACTION
+            = "com.android.server.connectivityservice.CONNECTED_TO_PROVISIONING_NETWORK_ACTION";
 
     public WirelessSettings() {
         super(null);
     }
-    /**
-     * Invoked on each preference click in this hierarchy, overrides
-     * PreferenceActivity's implementation.  Used to make sure we track the
-     * preference click events.
-     */
+
     @Override
     public boolean onPreferenceTreeClick(PreferenceScreen preferenceScreen, Preference preference) {
         if (ensurePinRestrictedPreference(preference)) {
             return true;
         }
         log("onPreferenceTreeClick: preference=" + preference);
+
         if (preference == mAirplaneModePreference && Boolean.parseBoolean(
                 SystemProperties.get(TelephonyProperties.PROPERTY_INECM_MODE))) {
-            // In ECM mode launch ECM app dialog
             startActivityForResult(
-                new Intent(TelephonyIntents.ACTION_SHOW_NOTICE_ECM_BLOCK_OTHERS, null),
-                REQUEST_CODE_EXIT_ECM);
+                    new Intent(TelephonyIntents.ACTION_SHOW_NOTICE_ECM_BLOCK_OTHERS, null),
+                    REQUEST_CODE_EXIT_ECM);
             return true;
         } else if (preference == findPreference(KEY_MANAGE_MOBILE_PLAN)) {
             onManageMobilePlanClick();
         }
-        // Let the intents be launched by the Preference manager
+
         return super.onPreferenceTreeClick(preferenceScreen, preference);
     }
 
-    private String mManageMobilePlanMessage;
-    private static final String CONNECTED_TO_PROVISIONING_NETWORK_ACTION
-            = "com.android.server.connectivityservice.CONNECTED_TO_PROVISIONING_NETWORK_ACTION";
     public void onManageMobilePlanClick() {
         log("onManageMobilePlanClick:");
         mManageMobilePlanMessage = null;
@@ -124,7 +130,6 @@ public class WirelessSettings extends RestrictedSettingsFragment
 
         NetworkInfo ni = mCm.getProvisioningOrActiveNetworkInfo();
         if (mTm.hasIccCard() && (ni != null)) {
-            // Get provisioning URL
             String url = mCm.getMobileProvisioningUrl();
             if (!TextUtils.isEmpty(url)) {
                 Intent intent = new Intent(CONNECTED_TO_PROVISIONING_NETWORK_ACTION);
@@ -133,11 +138,8 @@ public class WirelessSettings extends RestrictedSettingsFragment
                 context.sendBroadcast(intent);
                 mManageMobilePlanMessage = null;
             } else {
-                // No provisioning URL
                 String operatorName = mTm.getSimOperatorName();
                 if (TextUtils.isEmpty(operatorName)) {
-                    // Use NetworkOperatorName as second choice in case there is no
-                    // SPN (Service Provider Name on the SIM). Such as with T-mobile.
                     operatorName = mTm.getNetworkOperatorName();
                     if (TextUtils.isEmpty(operatorName)) {
                         mManageMobilePlanMessage = resources.getString(
@@ -152,10 +154,8 @@ public class WirelessSettings extends RestrictedSettingsFragment
                 }
             }
         } else if (mTm.hasIccCard() == false) {
-            // No sim card
             mManageMobilePlanMessage = resources.getString(R.string.mobile_insert_sim_card);
         } else {
-            // NetworkInfo is null, there is no connection
             mManageMobilePlanMessage = resources.getString(R.string.mobile_connect_to_internet);
         }
         if (!TextUtils.isEmpty(mManageMobilePlanMessage)) {
@@ -186,7 +186,6 @@ public class WirelessSettings extends RestrictedSettingsFragment
         Collection<SmsApplicationData> smsApplications =
                 SmsApplication.getApplicationCollection(getActivity());
 
-        // If the list is empty the dialog will be empty, but we will not crash.
         int count = smsApplications.size();
         CharSequence[] entries = new CharSequence[count];
         CharSequence[] entryValues = new CharSequence[count];
@@ -216,17 +215,17 @@ public class WirelessSettings extends RestrictedSettingsFragment
         switch (dialogId) {
             case MANAGE_MOBILE_PLAN_DIALOG_ID:
                 return new AlertDialog.Builder(getActivity())
-                            .setMessage(mManageMobilePlanMessage)
-                            .setCancelable(false)
-                            .setPositiveButton(com.android.internal.R.string.ok,
-                                    new DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(DialogInterface dialog, int id) {
-                                    log("MANAGE_MOBILE_PLAN_DIALOG.onClickListener id=" + id);
-                                    mManageMobilePlanMessage = null;
-                                }
-                            })
-                            .create();
+                        .setMessage(mManageMobilePlanMessage)
+                        .setCancelable(false)
+                        .setPositiveButton(com.android.internal.R.string.ok,
+                                new DialogInterface.OnClickListener() {
+                                    @Override
+                                    public void onClick(DialogInterface dialog, int id) {
+                                        log("MANAGE_MOBILE_PLAN_DIALOG.onClickListener id=" + id);
+                                        mManageMobilePlanMessage = null;
+                                    }
+                                })
+                        .create();
         }
         return super.onCreateDialog(dialogId);
     }
@@ -239,15 +238,133 @@ public class WirelessSettings extends RestrictedSettingsFragment
         if (!AirplaneModeEnabler.isAirplaneModeOn(context)) {
             return true;
         }
-        // Here we use the same logic in onCreate().
         String toggleable = Settings.Global.getString(context.getContentResolver(),
                 Settings.Global.AIRPLANE_MODE_TOGGLEABLE_RADIOS);
         return toggleable != null && toggleable.contains(type);
     }
 
     private boolean isSmsSupported() {
-        // Some tablet has sim card but could not do telephony operations. Skip those.
         return (mTm.getPhoneType() != TelephonyManager.PHONE_TYPE_NONE);
+    }
+
+    private boolean isWifiOnlyDevice() {
+        return Utils.isWifiOnly(getActivity());
+    }
+
+    private boolean isDisable2gEnabled() {
+        return Settings.Global.getInt(getActivity().getContentResolver(),
+                SETTING_DISABLE_2G, 0) == 1;
+    }
+
+    private int getCurrentPreferredNetworkMode() {
+        return Settings.Global.getInt(getActivity().getContentResolver(),
+                SETTING_PREFERRED_NETWORK_MODE, Phone.NT_MODE_WCDMA_PREF);
+    }
+
+    private int getSavedPreviousNetworkMode() {
+        return Settings.Global.getInt(getActivity().getContentResolver(),
+                SETTING_PREVIOUS_NETWORK_MODE, -1);
+    }
+
+    private void savePreviousNetworkMode(int mode) {
+        Settings.Global.putInt(getActivity().getContentResolver(),
+                SETTING_PREVIOUS_NETWORK_MODE, mode);
+    }
+
+    private void clearPreviousNetworkMode() {
+        Settings.Global.putInt(getActivity().getContentResolver(),
+                SETTING_PREVIOUS_NETWORK_MODE, -1);
+    }
+
+    private void applyPreferredNetworkMode(int mode) {
+    Settings.Global.putInt(
+            getActivity().getContentResolver(),
+            "preferred_network_mode",
+            mode);
+
+    try {
+        com.android.internal.telephony.Phone phone =
+                com.android.internal.telephony.PhoneFactory.getDefaultPhone();
+
+        phone.setPreferredNetworkType(mode, null);
+
+        Log.d(TAG, "Network mode applied: " + mode);
+    } catch (Throwable t) {
+        Log.e(TAG, "FAILED to set network mode", t);
+    }
+}
+
+    private void enable2gRestriction() {
+        int currentMode = getCurrentPreferredNetworkMode();
+        if (getSavedPreviousNetworkMode() == -1) {
+            savePreviousNetworkMode(currentMode);
+        }
+
+        applyPreferredNetworkMode(Phone.NT_MODE_LTE_WCDMA);
+    }
+
+    private void disable2gRestriction() {
+        int previousMode = getSavedPreviousNetworkMode();
+        if (previousMode != -1) {
+            applyPreferredNetworkMode(previousMode);
+            clearPreviousNetworkMode();
+        }
+    }
+
+    private void setDisable2gEnabled(boolean enabled) {
+        Settings.Global.putInt(getActivity().getContentResolver(),
+                SETTING_DISABLE_2G, enabled ? 1 : 0);
+
+        if (enabled) {
+            enable2gRestriction();
+        } else {
+            disable2gRestriction();
+        }
+    }
+
+    private void showDisable2gDialog() {
+        new AlertDialog.Builder(getActivity())
+                .setTitle(R.string.disable_2g_dialog_title)
+                .setMessage(R.string.disable_2g_dialog_message)
+                .setCancelable(true)
+                .setNegativeButton(R.string.button_cancel,
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                dialog.dismiss();
+                            }
+                        })
+                .setPositiveButton(R.string.button_ok,
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                setDisable2gEnabled(true);
+                                if (mDisable2gPreference != null) {
+                                    mDisable2gPreference.setChecked(true);
+                                }
+                            }
+                        })
+                .show();
+    }
+
+    private void initDisable2gSetting() {
+        mDisable2gPreference = (SwitchPreference) findPreference(KEY_DISABLE_2G_NETWORKS);
+        if (mDisable2gPreference == null) {
+            return;
+        }
+
+        if (isWifiOnlyDevice() || !isSmsSupported()) {
+            removePreference(KEY_DISABLE_2G_NETWORKS);
+            mDisable2gPreference = null;
+            return;
+        }
+
+        mDisable2gPreference.setOnPreferenceChangeListener(this);
+        mDisable2gPreference.setChecked(isDisable2gEnabled());
+
+        if (mDisable2gPreference.isChecked()) {
+            enable2gRestriction();
+        }
     }
 
     @Override
@@ -278,14 +395,13 @@ public class WirelessSettings extends RestrictedSettingsFragment
         mSmsApplicationPreference.setOnPreferenceChangeListener(this);
         initSmsApplicationSetting();
 
-        // Remove NSD checkbox by default
+        initDisable2gSetting();
+
         getPreferenceScreen().removePreference(nsd);
-        //mNsdEnabler = new NsdEnabler(activity, nsd);
 
         String toggleable = Settings.Global.getString(activity.getContentResolver(),
                 Settings.Global.AIRPLANE_MODE_TOGGLEABLE_RADIOS);
 
-        //enable/disable wimax depending on the value in config.xml
         boolean isWimaxEnabled = !isSecondaryUser && this.getResources().getBoolean(
                 com.android.internal.R.bool.config_wimaxEnabled);
         if (!isWimaxEnabled) {
@@ -293,7 +409,7 @@ public class WirelessSettings extends RestrictedSettingsFragment
             Preference ps = (Preference) findPreference(KEY_WIMAX_SETTINGS);
             if (ps != null) root.removePreference(ps);
         } else {
-            if (toggleable == null || !toggleable.contains(Settings.Global.RADIO_WIMAX )
+            if (toggleable == null || !toggleable.contains(Settings.Global.RADIO_WIMAX)
                     && isWimaxEnabled) {
                 Preference ps = (Preference) findPreference(KEY_WIMAX_SETTINGS);
                 ps.setDependency(KEY_TOGGLE_AIRPLANE);
@@ -301,26 +417,23 @@ public class WirelessSettings extends RestrictedSettingsFragment
         }
         protectByRestrictions(KEY_WIMAX_SETTINGS);
 
-        // Manually set dependencies for Wifi when not toggleable.
         if (toggleable == null || !toggleable.contains(Settings.Global.RADIO_WIFI)) {
             findPreference(KEY_VPN_SETTINGS).setDependency(KEY_TOGGLE_AIRPLANE);
         }
-        if (isSecondaryUser) { // Disable VPN
+        if (isSecondaryUser) {
             removePreference(KEY_VPN_SETTINGS);
         }
         protectByRestrictions(KEY_VPN_SETTINGS);
-        // Manually set dependencies for Bluetooth when not toggleable.
+
         if (toggleable == null || !toggleable.contains(Settings.Global.RADIO_BLUETOOTH)) {
             // No bluetooth-dependent items in the list. Code kept in case one is added later.
         }
 
-        // Manually set dependencies for NFC when not toggleable.
         if (toggleable == null || !toggleable.contains(Settings.Global.RADIO_NFC)) {
             findPreference(KEY_TOGGLE_NFC).setDependency(KEY_TOGGLE_AIRPLANE);
             findPreference(KEY_ANDROID_BEAM_SETTINGS).setDependency(KEY_TOGGLE_AIRPLANE);
         }
 
-        // Remove NFC if its not available
         mNfcAdapter = NfcAdapter.getDefaultAdapter(activity);
         if (mNfcAdapter == null) {
             getPreferenceScreen().removePreference(nfc);
@@ -328,13 +441,10 @@ public class WirelessSettings extends RestrictedSettingsFragment
             mNfcEnabler = null;
         }
 
-        // Remove Mobile Network Settings and Manage Mobile Plan if it's a wifi-only device.
         if (isSecondaryUser || Utils.isWifiOnly(getActivity())) {
             removePreference(KEY_MOBILE_NETWORK_SETTINGS);
             removePreference(KEY_MANAGE_MOBILE_PLAN);
         }
-        // Remove Mobile Network Settings and Manage Mobile Plan
-        // if config_show_mobile_plan sets false.
         boolean isMobilePlanEnabled = this.getResources().getBoolean(
                 R.bool.config_show_mobile_plan);
         if (!isMobilePlanEnabled) {
@@ -346,25 +456,20 @@ public class WirelessSettings extends RestrictedSettingsFragment
         protectByRestrictions(KEY_MOBILE_NETWORK_SETTINGS);
         protectByRestrictions(KEY_MANAGE_MOBILE_PLAN);
 
-        // Remove SMS Application if the device does not support SMS
         if (!isSmsSupported()) {
             removePreference(KEY_SMS_APPLICATION);
         }
 
-        // Remove Airplane Mode settings if it's a stationary device such as a TV.
         if (getActivity().getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEVISION)) {
             removePreference(KEY_TOGGLE_AIRPLANE);
         }
 
-        // Enable Proxy selector settings if allowed.
         Preference mGlobalProxy = findPreference(KEY_PROXY_SETTINGS);
         DevicePolicyManager mDPM = (DevicePolicyManager)
                 activity.getSystemService(Context.DEVICE_POLICY_SERVICE);
-        // proxy UI disabled until we have better app support
         getPreferenceScreen().removePreference(mGlobalProxy);
         mGlobalProxy.setEnabled(mDPM.getGlobalProxyAdmin() == null);
 
-        // Disable Tethering if it's not allowed or if it's a wifi-only device
         ConnectivityManager cm =
                 (ConnectivityManager) activity.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (isSecondaryUser || !cm.isTetheringSupported()) {
@@ -375,7 +480,6 @@ public class WirelessSettings extends RestrictedSettingsFragment
         }
         protectByRestrictions(KEY_TETHER_SETTINGS);
 
-        // Enable link to CMAS app settings depending on the value in config.xml.
         boolean isCellBroadcastAppLinkEnabled = this.getResources().getBoolean(
                 com.android.internal.R.bool.config_cellBroadcastAppLinks);
         try {
@@ -383,11 +487,11 @@ public class WirelessSettings extends RestrictedSettingsFragment
                 PackageManager pm = getPackageManager();
                 if (pm.getApplicationEnabledSetting("com.android.cellbroadcastreceiver")
                         == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-                    isCellBroadcastAppLinkEnabled = false;  // CMAS app disabled
+                    isCellBroadcastAppLinkEnabled = false;
                 }
             }
         } catch (IllegalArgumentException ignored) {
-            isCellBroadcastAppLinkEnabled = false;  // CMAS app not installed
+            isCellBroadcastAppLinkEnabled = false;
         }
         if (isSecondaryUser || !isCellBroadcastAppLinkEnabled) {
             PreferenceScreen root = getPreferenceScreen();
@@ -400,7 +504,6 @@ public class WirelessSettings extends RestrictedSettingsFragment
     @Override
     public void onStart() {
         super.onStart();
-
         initSmsApplicationSetting();
     }
 
@@ -414,6 +517,14 @@ public class WirelessSettings extends RestrictedSettingsFragment
         }
         if (mNsdEnabler != null) {
             mNsdEnabler.resume();
+        }
+
+        if (mDisable2gPreference != null) {
+            boolean enabled = isDisable2gEnabled();
+            mDisable2gPreference.setChecked(enabled);
+            if (enabled) {
+                enable2gRestriction();
+            }
         }
     }
 
@@ -443,7 +554,6 @@ public class WirelessSettings extends RestrictedSettingsFragment
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == REQUEST_CODE_EXIT_ECM) {
             Boolean isChoiceYes = data.getBooleanExtra(EXIT_ECM_RESULT, false);
-            // Set Airplane mode based on the return value and checkbox state
             mAirplaneModeEnabler.setAirplaneModeInECM(isChoiceYes,
                     mAirplaneModePreference.isChecked());
         }
@@ -462,6 +572,18 @@ public class WirelessSettings extends RestrictedSettingsFragment
             updateSmsApplicationSetting();
             return true;
         }
+
+        if (preference == mDisable2gPreference) {
+            boolean enable = (Boolean) newValue;
+            if (enable) {
+                showDisable2gDialog();
+                return false;
+            } else {
+                setDisable2gEnabled(false);
+                return true;
+            }
+        }
+
         return false;
     }
 }
